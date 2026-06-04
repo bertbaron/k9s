@@ -74,4 +74,10 @@ var (
 		"xr",
 		"xray",
 	)
+	traceCmd = sets.New(
+		"trace",
+		"tr",
+		"xp",
+		"crossplane",
+	)
 )

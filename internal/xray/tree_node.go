@@ -125,11 +125,13 @@ func (c ChildNodes) Swap(i, j int) {
 	c[i], c[j] = c[j], c[i]
 }
 
-// Less returns true if i < j.
+// Less returns true if i < j, sorting by resource kind first then by name.
 func (c ChildNodes) Less(i, j int) bool {
-	id1, id2 := c[i].ID, c[j].ID
-
-	return sortorder.NaturalLess(id1, id2)
+	r1, r2 := c[i].GVR.R(), c[j].GVR.R()
+	if r1 != r2 {
+		return sortorder.NaturalLess(r1, r2)
+	}
+	return sortorder.NaturalLess(c[i].ID, c[j].ID)
 }
 
 // ----------------------------------------------------------------------------
@@ -392,7 +394,7 @@ func category(gvr *client.GVR) string {
 		return ""
 	}
 
-	return meta.SingularName
+	return meta.Kind
 }
 
 func (t TreeNode) computeTitle(noIcons bool) string {
@@ -413,11 +415,13 @@ func (t TreeNode) toTitle() (title string) {
 	_, n := client.Namespaced(t.ID)
 	color, status := "white", "OK"
 	if v, ok := t.Extras[StatusKey]; ok {
-		switch v {
-		case ToastStatus:
+		switch {
+		case v == ToastStatus:
 			color, status = "orangered", toast
-		case MissingRefStatus:
-			color, status = "orange", toast+"_REF"
+		case v == MissingRefStatus:
+			color, status = "orange", "MISSING"
+		case v != OkStatus && v != CompletedStatus && v != "":
+			color, status = "orangered", v
 		}
 	}
 	defer func() {
@@ -452,11 +456,13 @@ func (t TreeNode) toEmojiTitle() (title string) {
 	_, n := client.Namespaced(t.ID)
 	color, status := "white", "OK"
 	if v, ok := t.Extras[StatusKey]; ok {
-		switch v {
-		case ToastStatus:
+		switch {
+		case v == ToastStatus:
 			color, status = "orangered", toast
-		case MissingRefStatus:
-			color, status = "orange", toast+"_REF"
+		case v == MissingRefStatus:
+			color, status = "orange", "MISSING"
+		case v != OkStatus && v != CompletedStatus && v != "":
+			color, status = "orangered", v
 		}
 	}
 	defer func() {
@@ -465,7 +471,13 @@ func (t TreeNode) toEmojiTitle() (title string) {
 		}
 	}()
 
-	title = fmt.Sprintf(colorFmt, toEmoji(t.GVR), color, n)
+	if emoji := toEmoji(t.GVR); emoji != "📎" {
+		title = fmt.Sprintf(colorFmt, emoji, color, n)
+	} else if categ := category(t.GVR); categ != "" {
+		title = fmt.Sprintf(titleFmt, categ, color, n)
+	} else {
+		title = fmt.Sprintf(colorFmt, emoji, color, n)
+	}
 	if !t.IsLeaf() {
 		title += fmt.Sprintf("[white::d](%d[-::d])[-::-]", t.CountChildren())
 	}

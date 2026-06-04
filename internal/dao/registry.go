@@ -114,6 +114,21 @@ func (m *Meta) GVK2GVR(gv schema.GroupVersion, kind string) (*client.GVR, bool, 
 	return client.NoGVR, false, false
 }
 
+// GKR2GVR resolves a GVR by group+kind only, ignoring version.
+// Used as a fallback when the exact version in a resourceRef no longer exists.
+func (m *Meta) GKR2GVR(group, kind string) (*client.GVR, bool, bool) {
+	m.mx.RLock()
+	defer m.mx.RUnlock()
+
+	for gvr, meta := range m.resMetas {
+		if group == meta.Group && kind == meta.Kind {
+			return gvr, meta.Namespaced, true
+		}
+	}
+
+	return client.NoGVR, false, false
+}
+
 // IsNamespaced checks if a given resource is namespaced.
 func (m *Meta) IsNamespaced(gvr *client.GVR) (bool, error) {
 	res, err := m.MetaFor(gvr)
@@ -209,6 +224,13 @@ func loadK9s(m ResourceMetas) {
 		Name:         "xrays",
 		Kind:         "XRays",
 		SingularName: "xray",
+		Categories:   []string{k9sCat},
+	}
+	m[client.TraceGVR] = &metav1.APIResource{
+		Name:         "trace",
+		Kind:         "Trace",
+		SingularName: "trace",
+		ShortNames:   []string{"tr", "xp"},
 		Categories:   []string{k9sCat},
 	}
 	m[client.RefGVR] = &metav1.APIResource{

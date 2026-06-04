@@ -190,6 +190,29 @@ func (c *Interpreter) IsXrayCmd() bool {
 	return xrayCmd.Has(c.cmd)
 }
 
+// IsTraceCmd returns true if trace cmd is detected.
+func (c *Interpreter) IsTraceCmd() bool {
+	return traceCmd.Has(c.cmd)
+}
+
+// TraceArgs returns the gvr and resource path for a trace command.
+// Usage: :trace <resource-type> <ns/name> or :trace <resource-type> <name> <ns>
+func (c *Interpreter) TraceArgs() (resource, path string, ok bool) {
+	if !c.IsTraceCmd() {
+		return
+	}
+	resource, ok1 := c.args[topicKey]
+	if !ok1 {
+		return
+	}
+	path, ok2 := c.args[nsKey]
+	if !ok2 {
+		return
+	}
+	ok = true
+	return
+}
+
 // IsContextCmd returns true if context cmd is detected.
 func (c *Interpreter) IsContextCmd() bool {
 	return contextCmd.Has(c.cmd)

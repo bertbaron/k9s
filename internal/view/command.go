@@ -172,6 +172,22 @@ func (c *Command) xrayCmd(p *cmd.Interpreter, pushCmd bool) error {
 	return c.exec(p, client.XGVR, NewXray(gvr), true, pushCmd)
 }
 
+func (c *Command) traceCmd(p *cmd.Interpreter, pushCmd bool) error {
+	resource, path, ok := p.TraceArgs()
+	if !ok {
+		return errors.New("invalid command. use `trace <resource> <ns/name>`")
+	}
+	if c.alias == nil {
+		return fmt.Errorf("no connection available")
+	}
+	gvr, ok := c.alias.Resolve(cmd.NewInterpreter(resource))
+	if !ok {
+		return fmt.Errorf("invalid resource name: %q", resource)
+	}
+
+	return c.exec(p, client.TraceGVR, NewTrace(gvr, path), true, pushCmd)
+}
+
 // Run execs the command by showing associated display.
 func (c *Command) run(p *cmd.Interpreter, fqn string, clearStack, pushCmd bool) error {
 	if c.specialCmd(p, pushCmd) {
@@ -287,6 +303,10 @@ func (c *Command) specialCmd(p *cmd.Interpreter, pushCmd bool) bool {
 		if err := c.xrayCmd(p, pushCmd); err != nil {
 			c.app.Flash().Err(err)
 		}
+	case p.IsTraceCmd():
+		if err := c.traceCmd(p, pushCmd); err != nil {
+			c.app.Flash().Err(err)
+		}
 	case p.IsRBACCmd():
 		if cat, sub, ok := p.RBACArgs(); !ok {
 			c.app.Flash().Errf("Invalid command. Use `can [u|g|s]:xxx`")
@@ -323,7 +343,7 @@ func (c *Command) viewMetaFor(p *cmd.Interpreter) (*client.GVR, *MetaViewer, *cm
 
 	v := MetaViewer{
 		viewerFn: func(gvr *client.GVR) ResourceViewer {
-			return NewScaleExtender(NewOwnerExtender(NewBrowser(gvr)))
+			return NewTraceExtender(NewScaleExtender(NewOwnerExtender(NewBrowser(gvr))))
 		},
 	}
 	if mv, ok := customViewers[gvr]; ok {
