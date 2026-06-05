@@ -117,5 +117,4 @@ nfpms:
         file_info:
           mode: 0644
 
-sboms:
-  - artifacts: archive
+sboms: []
