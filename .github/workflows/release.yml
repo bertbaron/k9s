@@ -22,6 +22,10 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
+      - name: Determine base upstream tag
+        id: prev-tag
+        run: echo "tag=$(echo '${{ github.ref_name }}' | sed 's/-crossplane\.[0-9]*$//')" >> $GITHUB_OUTPUT
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -29,3 +33,4 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_PREVIOUS_TAG: ${{ steps.prev-tag.outputs.tag }}
