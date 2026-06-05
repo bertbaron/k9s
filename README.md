@@ -1,3 +1,7 @@
+> **Fork note:** This fork adds a Crossplane trace view (similar to xray) for both V1 and V2 Crossplane objects.
+> Press `Ctrl-T` on any Crossplane resource to open the trace view, or use `:trace <resource> <ns/name>`.
+> See the [original repo](https://github.com/derailed/k9s) for the upstream project.
+
 <img src="assets/k9s.png" alt="k9s">
 
 ## K9s - Kubernetes CLI To Manage Your Clusters In Style!
