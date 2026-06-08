@@ -69,7 +69,6 @@ func (t *Trace) RemoveListener(l TreeListener) {
 
 // Watch initiates model updates.
 func (t *Trace) Watch(ctx context.Context) {
-	t.Refresh(ctx)
 	go t.updater(ctx)
 }
 
@@ -149,8 +148,11 @@ func (t *Trace) reconcile(ctx context.Context) error {
 		return fmt.Errorf("expected Factory in context but got %T", ctx.Value(internal.KeyFactory))
 	}
 
+	fetchCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	cp := dao.NewCrossplane(factory)
-	tree, err := cp.FetchTree(ctx, t.gvr, t.path)
+	tree, err := cp.FetchTree(fetchCtx, t.gvr, t.path)
 	if err != nil {
 		return err
 	}
