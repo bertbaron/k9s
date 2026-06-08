@@ -260,9 +260,14 @@ func (c *Crossplane) resolveRef(ref resourceRef, parentNamespace string) (*clien
 
 	gvr, namespaced, found := MetaAccess.GVK2GVR(gv, ref.Kind)
 	if !found {
-		// Version may have changed (e.g. provider upgrade from v1beta1 → v1beta2).
-		// Fall back to matching by group+kind only.
-		gvr, namespaced, found = MetaAccess.GKR2GVR(gv.Group, ref.Kind)
+		// Exact version not registered (e.g. provider upgraded from v1beta1 → v1beta2).
+		// Find the resource name (plural) via group+kind
+		altGVR, ns2, found2 := MetaAccess.GKR2GVR(gv.Group, ref.Kind)
+		if found2 {
+			gvr = client.NewGVR(gv.Group + "/" + gv.Version + "/" + altGVR.R())
+			namespaced = ns2
+			found = true
+		}
 	}
 	if !found {
 		return nil, "", fmt.Errorf("unable to resolve GVR for %s/%s", ref.APIVersion, ref.Kind)
