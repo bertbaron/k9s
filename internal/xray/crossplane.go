@@ -123,7 +123,9 @@ func crossplaneConditionMessage(obj *unstructured.Unstructured) string {
 }
 
 // BuildCrossplaneNode creates a TreeNode for a Crossplane resource.
-func BuildCrossplaneNode(gvr *client.GVR, obj *unstructured.Unstructured, missing bool) *TreeNode {
+// navGVR is the canonical/registered GVR used for display and navigation;
+// it may differ from the GVR used to fetch the resource.
+func BuildCrossplaneNode(navGVR *client.GVR, obj *unstructured.Unstructured, missing bool) *TreeNode {
 	var id string
 	if obj.GetNamespace() != "" && obj.GetNamespace() != client.ClusterScope {
 		id = client.FQN(obj.GetNamespace(), obj.GetName())
@@ -131,7 +133,10 @@ func BuildCrossplaneNode(gvr *client.GVR, obj *unstructured.Unstructured, missin
 		id = client.FQN(client.ClusterScope, obj.GetName())
 	}
 
-	node := NewTreeNode(gvr, id)
+	node := NewTreeNode(navGVR, id)
+	if obj.GetKind() != "" {
+		node.Extras[KindKey] = obj.GetKind()
+	}
 	if missing {
 		node.Extras[StatusKey] = MissingRefStatus
 	} else {

@@ -31,6 +31,9 @@ const (
 	// InfoKey state map key.
 	InfoKey = "info"
 
+	// KindKey stores the resource kind when MetaAccess lookup may not find it.
+	KindKey = "kind"
+
 	// OkStatus stands for all is cool.
 	OkStatus = "ok"
 
@@ -397,6 +400,13 @@ func category(gvr *client.GVR) string {
 	return meta.Kind
 }
 
+func categoryWithFallback(gvr *client.GVR, extras map[string]string) string {
+	if c := category(gvr); c != "" {
+		return c
+	}
+	return extras[KindKey]
+}
+
 func (t TreeNode) computeTitle(noIcons bool) string {
 	if !noIcons {
 		return t.toEmojiTitle()
@@ -430,7 +440,7 @@ func (t TreeNode) toTitle() (title string) {
 		}
 	}()
 
-	categ := category(t.GVR)
+	categ := categoryWithFallback(t.GVR, t.Extras)
 	if categ == "" {
 		title = fmt.Sprintf(topTitleFmt, color, n)
 	} else {
@@ -473,7 +483,7 @@ func (t TreeNode) toEmojiTitle() (title string) {
 
 	if emoji := toEmoji(t.GVR); emoji != "📎" {
 		title = fmt.Sprintf(colorFmt, emoji, color, n)
-	} else if categ := category(t.GVR); categ != "" {
+	} else if categ := categoryWithFallback(t.GVR, t.Extras); categ != "" {
 		title = fmt.Sprintf(titleFmt, categ, color, n)
 	} else {
 		title = fmt.Sprintf(colorFmt, emoji, color, n)

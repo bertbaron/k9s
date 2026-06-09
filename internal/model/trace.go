@@ -201,7 +201,11 @@ func (t *Trace) buildTreeNodes(parent *xray.TreeNode, node *dao.CrossplaneNode) 
 		return
 	}
 
-	treeNode := xray.BuildCrossplaneNode(node.GVR, node.Object, node.Missing)
+	navGVR := node.NavGVR
+	if navGVR == nil {
+		navGVR = node.GVR
+	}
+	treeNode := xray.BuildCrossplaneNode(navGVR, node.Object, node.Missing)
 	parent.Add(treeNode)
 
 	for _, child := range node.Children {

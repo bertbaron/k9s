@@ -16,6 +16,7 @@ import (
 // CrossplaneNode represents a node in a Crossplane resource tree.
 type CrossplaneNode struct {
 	GVR      *client.GVR
+	NavGVR   *client.GVR // canonical GVR for display/navigation (may differ from GVR used to fetch)
 	Object   *unstructured.Unstructured
 	Missing  bool
 	Children []*CrossplaneNode
@@ -40,7 +41,7 @@ func (c *Crossplane) FetchTree(ctx context.Context, gvr *client.GVR, path string
 	}
 
 	visited := make(map[string]bool)
-	return c.fetchNode(ctx, rootGVR, rootPath, "", visited)
+	return c.fetchNode(ctx, rootGVR, rootGVR, rootPath, "", visited)
 }
 
 // findRoot walks up ownerReferences and claimRef to find the top-level resource.
@@ -67,9 +68,9 @@ func (c *Crossplane) findRoot(ctx context.Context, gvr *client.GVR, path string)
 
 		// If this resource has spec.claimRef, walk up to the Claim.
 		if claimRef, ok := extractClaimRef(obj); ok {
-			claimGVR, claimPath, err := c.resolveRef(claimRef, "")
+			claimFetchGVR, _, claimPath, err := c.resolveRef(claimRef, "")
 			if err == nil {
-				return claimGVR, claimPath, nil
+				return claimFetchGVR, claimPath, nil
 			}
 			return currentGVR, currentPath, nil
 		}
@@ -101,14 +102,14 @@ func (c *Crossplane) findRoot(ctx context.Context, gvr *client.GVR, path string)
 	return currentGVR, currentPath, nil
 }
 
-func (c *Crossplane) fetchNode(ctx context.Context, gvr *client.GVR, path, expectedKind string, visited map[string]bool) (*CrossplaneNode, error) {
-	key := gvr.String() + "/" + path
+func (c *Crossplane) fetchNode(ctx context.Context, fetchGVR, navGVR *client.GVR, path, expectedKind string, visited map[string]bool) (*CrossplaneNode, error) {
+	key := fetchGVR.String() + "/" + path
 	if visited[key] {
 		return nil, nil
 	}
 	visited[key] = true
 
-	obj, err := c.getResource(ctx, gvr, path)
+	obj, err := c.getResource(ctx, fetchGVR, path)
 	if err != nil {
 		ns, name := client.Namespaced(path)
 		placeholder := &unstructured.Unstructured{}
@@ -117,11 +118,12 @@ func (c *Crossplane) fetchNode(ctx context.Context, gvr *client.GVR, path, expec
 		if expectedKind != "" {
 			placeholder.SetKind(expectedKind)
 		}
-		return &CrossplaneNode{GVR: gvr, Object: placeholder, Missing: true}, nil
+		return &CrossplaneNode{GVR: fetchGVR, NavGVR: navGVR, Object: placeholder, Missing: true}, nil
 	}
 
 	node := &CrossplaneNode{
-		GVR:    gvr,
+		GVR:    fetchGVR,
+		NavGVR: navGVR,
 		Object: obj,
 	}
 
@@ -129,9 +131,9 @@ func (c *Crossplane) fetchNode(ctx context.Context, gvr *client.GVR, path, expec
 
 	// Follow spec.resourceRef (Claim → Composite, V1 only)
 	if ref, ok := extractResourceRef(obj); ok {
-		childGVR, childPath, err := c.resolveRef(ref, parentNamespace)
+		childFetch, childNav, childPath, err := c.resolveRef(ref, parentNamespace)
 		if err == nil {
-			child, err := c.fetchNode(ctx, childGVR, childPath, ref.Kind, visited)
+			child, err := c.fetchNode(ctx, childFetch, childNav, childPath, ref.Kind, visited)
 			if err == nil && child != nil {
 				node.Children = append(node.Children, child)
 			}
@@ -141,7 +143,7 @@ func (c *Crossplane) fetchNode(ctx context.Context, gvr *client.GVR, path, expec
 	// Follow spec.resourceRefs (V1: top-level) or spec.crossplane.resourceRefs (V2)
 	if refs, ok := extractResourceRefs(obj); ok {
 		for _, ref := range refs {
-			childGVR, childPath, err := c.resolveRef(ref, parentNamespace)
+			childFetch, childNav, childPath, err := c.resolveRef(ref, parentNamespace)
 			if err != nil {
 				// GVR unknown but ref exists — show as missing node with what we know
 				placeholder := &unstructured.Unstructured{}
@@ -150,12 +152,13 @@ func (c *Crossplane) fetchNode(ctx context.Context, gvr *client.GVR, path, expec
 				placeholder.SetKind(ref.Kind)
 				node.Children = append(node.Children, &CrossplaneNode{
 					GVR:     client.NewGVR(ref.APIVersion + "/" + ref.Kind),
+					NavGVR:  client.NewGVR(ref.APIVersion + "/" + ref.Kind),
 					Object:  placeholder,
 					Missing: true,
 				})
 				continue
 			}
-			child, err := c.fetchNode(ctx, childGVR, childPath, ref.Kind, visited)
+			child, err := c.fetchNode(ctx, childFetch, childNav, childPath, ref.Kind, visited)
 			if err == nil && child != nil {
 				node.Children = append(node.Children, child)
 			}
@@ -248,42 +251,44 @@ func parseRef(m map[string]interface{}) resourceRef {
 	return ref
 }
 
-func (c *Crossplane) resolveRef(ref resourceRef, parentNamespace string) (*client.GVR, string, error) {
+// resolveRef returns the fetch GVR (using ref's version to avoid conversion webhooks),
+// the canonical/nav GVR (the registered version for display and navigation), and the path.
+func (c *Crossplane) resolveRef(ref resourceRef, parentNamespace string) (fetchGVR, navGVR *client.GVR, path string, err error) {
 	if ref.APIVersion == "" || ref.Kind == "" || ref.Name == "" {
-		return nil, "", fmt.Errorf("incomplete resource reference")
+		return nil, nil, "", fmt.Errorf("incomplete resource reference")
 	}
 
 	gv, err := schema.ParseGroupVersion(ref.APIVersion)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
 
-	gvr, namespaced, found := MetaAccess.GVK2GVR(gv, ref.Kind)
-	if !found {
+	registeredGVR, namespaced, found := MetaAccess.GVK2GVR(gv, ref.Kind)
+	if found {
+		// Exact version is registered — fetch and navigate with the same GVR.
+		fetchGVR = registeredGVR
+		navGVR = registeredGVR
+	} else {
 		// Exact version not registered (e.g. provider upgraded from v1beta1 → v1beta2).
-		// Find the resource name (plural) via group+kind
+		// Use registered GVR for navigation/display, but fetch with the ref's original version
+		// to avoid triggering broken conversion webhooks.
 		altGVR, ns2, found2 := MetaAccess.GKR2GVR(gv.Group, ref.Kind)
-		if found2 {
-			gvr = client.NewGVR(gv.Group + "/" + gv.Version + "/" + altGVR.R())
-			namespaced = ns2
-			found = true
+		if !found2 {
+			return nil, nil, "", fmt.Errorf("unable to resolve GVR for %s/%s", ref.APIVersion, ref.Kind)
 		}
-	}
-	if !found {
-		return nil, "", fmt.Errorf("unable to resolve GVR for %s/%s", ref.APIVersion, ref.Kind)
+		fetchGVR = client.NewGVR(gv.Group + "/" + gv.Version + "/" + altGVR.R())
+		navGVR = altGVR
+		namespaced = ns2
 	}
 
-	var path string
 	if namespaced && ref.Namespace != "" {
 		path = client.FQN(ref.Namespace, ref.Name)
 	} else if namespaced && parentNamespace != "" {
 		// V2: refs omit namespace — inherit from parent resource.
 		path = client.FQN(parentNamespace, ref.Name)
-	} else if namespaced {
-		path = client.FQN(client.ClusterScope, ref.Name)
 	} else {
 		path = client.FQN(client.ClusterScope, ref.Name)
 	}
 
-	return gvr, path, nil
+	return fetchGVR, navGVR, path, nil
 }
